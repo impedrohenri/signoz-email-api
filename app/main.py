@@ -1,14 +1,14 @@
 from fastapi import FastAPI, Request, HTTPException
 import requests
 import os
+from datetime import datetime
 
-app = FastAPI(title="SigNoz → Brevo Alert API")
+app = FastAPI(title="SigNoz → Email Alert API")
 
 EMAIL_API_KEY = os.getenv("EMAIL_API_KEY")
 EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_TO = os.getenv("EMAIL_TO")
 
-# Importa url do .env
 EMAIL_URL = os.getenv("EMAIL_URL")
 
 
@@ -17,42 +17,176 @@ async def receive_alert(request: Request):
     data = await request.json()
 
     try:
-        status = data.get("status", "unknown")
-
+        status = data.get("status", "unknown").upper()
         alerts = data.get("alerts", [])
-        alert = alerts[0] if alerts else {}
+
+        if not alerts:
+            raise Exception("Payload sem alerts")
+
+        alert = alerts[0]
 
         labels = alert.get("labels", {})
         annotations = alert.get("annotations", {})
+        common_labels = data.get("commonLabels", {})
 
-        alert_name = labels.get("alertname", "Alerta sem nome")
-        summary = annotations.get("summary", "Sem resumo")
-        description = annotations.get("description", "")
+        alert_name = labels.get("alertname", "Alerta desconhecido")
+        severity = labels.get("severity", "N/A").upper()
+        instance = labels.get("instance", "N/A")
+        device = labels.get("dev", "N/A")
 
-        subject = f"[SigNoz] {alert_name} ({status.upper()})"
+        summary = annotations.get("summary", "")
+        info = annotations.get("info", "")
+        starts_at = format_datetime(alert.get("startsAt"))
 
-        body = f"""
-            🚨 ALERTA DO SIGOZ
+        subject = f"[SigNoz][{severity}] {alert_name} - {status}"
 
-            Status: {status}
-            Nome: {alert_name}
+        html_body = build_html_email(
+            status=status,
+            alert_name=alert_name,
+            severity=severity,
+            instance=instance,
+            device=device,
+            summary=summary,
+            info=info,
+            starts_at=starts_at,
+            labels=common_labels,
+        )
 
-            Resumo:
-            {summary}
+        send_email(subject, html_body)
 
-            Descrição:
-            {description}
-            """
-
-        send_email(subject, body)
-
-        return {"ok": True, "message": "Email enviado"}
+        return {"ok": True, "message": "Email HTML enviado"}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def send_email(subject: str, content: str):
+def build_html_email(
+    *,
+    status: str,
+    alert_name: str,
+    severity: str,
+    instance: str,
+    device: str,
+    summary: str,
+    info: str,
+    starts_at: str,
+    labels: dict,
+) -> str:
+    status_color = "#d93025" if status == "FIRING" else "#188038"
+    severity_color = {
+        "CRITICAL": "#b71c1c",
+        "WARNING": "#f57c00",
+        "INFO": "#1976d2",
+    }.get(severity, "#333")
+
+    labels_html = "".join(
+        f"<tr><td><b>{k}</b></td><td>{v}</td></tr>"
+        for k, v in labels.items()
+    )
+
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body {{
+      font-family: Arial, Helvetica, sans-serif;
+      background-color: #f4f6f8;
+      padding: 20px;
+    }}
+    .container {{
+      max-width: 700px;
+      margin: auto;
+      background: #ffffff;
+      border-radius: 8px;
+      padding: 24px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }}
+    h1 {{
+      font-size: 22px;
+      margin-bottom: 10px;
+    }}
+    .status {{
+      color: white;
+      background: {status_color};
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-weight: bold;
+      margin-bottom: 16px;
+    }}
+    .severity {{
+      color: {severity_color};
+      font-weight: bold;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }}
+    td {{
+      padding: 8px;
+      border-bottom: 1px solid #e0e0e0;
+    }}
+    .footer {{
+      margin-top: 24px;
+      font-size: 12px;
+      color: #666;
+      text-align: center;
+    }}
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="status">{status}</div>
+
+    <h1>{alert_name}</h1>
+
+    <p>
+      <b>Severidade:</b>
+      <span class="severity">{severity}</span>
+    </p>
+
+    <table>
+      <tr>
+        <td><b>Instância</b></td>
+        <td>{instance}</td>
+      </tr>
+      <tr>
+        <td><b>Dispositivo</b></td>
+        <td>{device}</td>
+      </tr>
+      <tr>
+        <td><b>Início</b></td>
+        <td>{starts_at}</td>
+      </tr>
+      <tr>
+        <td><b>Resumo</b></td>
+        <td>{summary}</td>
+      </tr>
+      <tr>
+        <td><b>Detalhes</b></td>
+        <td>{info}</td>
+      </tr>
+    </table>
+
+    <h3>Labels</h3>
+    <table>
+      {labels_html}
+    </table>
+
+    <div class="footer">
+      Alerta gerado automaticamente pelo SigNoz
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+
+def send_email(subject: str, html_content: str):
     if not EMAIL_API_KEY:
         raise Exception("EMAIL_API_KEY não configurada")
 
@@ -66,10 +200,21 @@ def send_email(subject: str, content: str):
         "sender": {"email": EMAIL_FROM, "name": "SigNoz Alerts"},
         "to": [{"email": EMAIL_TO}],
         "subject": subject,
-        "textContent": content,
+        "htmlContent": html_content,
     }
 
     response = requests.post(EMAIL_URL, json=payload, headers=headers)
 
     if response.status_code >= 300:
-        raise Exception(f"Erro Brevo: {response.text}")
+        raise Exception(f"Erro Email: {response.text}")
+
+
+def format_datetime(value: str | None) -> str:
+    if not value:
+        return "N/A"
+    try:
+        return datetime.fromisoformat(value.replace("Z", "")).strftime(
+            "%d/%m/%Y %H:%M:%S"
+        )
+    except Exception:
+        return value
