@@ -7,7 +7,7 @@ app = FastAPI(title="SigNoz → Email Alert API")
 
 EMAIL_API_KEY = os.getenv("EMAIL_API_KEY")
 EMAIL_FROM = os.getenv("EMAIL_FROM")
-EMAIL_TO = os.getenv("EMAIL_TO")
+EMAIL_TO_RAW = os.getenv("EMAIL_TO")
 
 EMAIL_URL = os.getenv("EMAIL_URL")
 
@@ -186,9 +186,23 @@ def build_html_email(
 """
 
 
+def parse_recipients(raw: str | None) -> list[dict]:
+    if not raw:
+        raise Exception("EMAIL_TO não configurado")
+
+    emails = [e.strip() for e in raw.split(",") if e.strip()]
+
+    if not emails:
+        raise Exception("Nenhum email válido em EMAIL_TO")
+
+    return [{"email": email} for email in emails]
+
+
 def send_email(subject: str, html_content: str):
     if not EMAIL_API_KEY:
         raise Exception("EMAIL_API_KEY não configurada")
+
+    recipients = parse_recipients(EMAIL_TO_RAW)
 
     headers = {
         "api-key": EMAIL_API_KEY,
@@ -198,7 +212,7 @@ def send_email(subject: str, html_content: str):
 
     payload = {
         "sender": {"email": EMAIL_FROM, "name": "SigNoz Alerts"},
-        "to": [{"email": EMAIL_TO}],
+        "to": recipients,
         "subject": subject,
         "htmlContent": html_content,
     }
