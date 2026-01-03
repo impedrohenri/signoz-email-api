@@ -1,0 +1,9 @@
+services:
+  email-api:
+    build: .
+    container_name: signoz_email_api
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    restart: unless-stopped
