@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "signoz-email-api"
+version = "0.1.0"
+description = "Middleware FastAPI para enviar alertas do SigNoz via http para email"
+authors = ["Pedro Henrique <impedrohenri@gmail.com>"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.115.6"
+uvicorn = { extras = ["standard"], version = "^0.30.0" }
+requests = "^2.32.3"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
