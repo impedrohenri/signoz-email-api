@@ -1,8 +1,9 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends, status
 import requests
 import os
 from datetime import datetime
 import re
+from services.AuthService import authenticate
 
 app = FastAPI(title="SigNoz Dispatcher Pro")
 
@@ -18,7 +19,7 @@ BLACK_LIST_LABELS = {
     "monitor", "groupKey", "fingerprint", "threshold.name"
 }
 
-@app.post("/alert")
+@app.post("/alert", dependencies=[Depends(authenticate)])
 async def receive_alert(request: Request):
     data = await request.json()
     try:
